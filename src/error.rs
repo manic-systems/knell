@@ -5,7 +5,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Everything that can go wrong inside `knell`.
 #[non_exhaustive]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, flub::Error)]
 pub enum Error {
   /// A system call or filesystem operation failed; `context` names what was
   /// being attempted.

@@ -5,11 +5,11 @@ edition      = "2024"
 license      = "EUPL-1.2"
 repository   = "https://github.com/manic-systems/knell"
 rust-version = "1.95.0"
-version      = "1.0.0"
+version      = "1.0.1"
 
 [dependencies]
 libc      = "0.2.190"
-thiserror = "2.0.21"
+flub      = "0.1.0"
 
 [dev-dependencies]
 libc = "0.2.190"
