@@ -17,6 +17,7 @@ use std::{
   io::{
     BufRead as _,
     BufReader,
+    ErrorKind,
     Write as _,
   },
   os::unix::net::UnixStream,
@@ -38,6 +39,7 @@ use std::{
 
 use knell::{
   daemonize::Daemonize,
+  error::Error,
   framed::{
     DEFAULT_MAX_FRAME_BYTES,
     FrameReader,
@@ -97,12 +99,12 @@ fn daemonize_round_trip() {
   assert!(sock.exists(), "socket missing after readiness");
 
   let mut stream = connect_with_retry(&sock);
-  let me = own_uid();
-  assert_eq!(
-    peer_uid(&stream).expect("peer_uid"),
-    me,
-    "peer uid should match our own uid"
-  );
+  let peer = peer_uid(&stream).map_err(|err| err.kind());
+  if cfg!(target_os = "linux") {
+    assert_eq!(peer, Ok(own_uid()), "peer uid should match our own uid");
+  } else {
+    assert_eq!(peer, Err(ErrorKind::Unsupported));
+  }
 
   stream
     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -169,7 +171,9 @@ fn run_daemon(sock: &Path, pid: &Path, sentinel: &Path) -> ! {
   let me = own_uid();
   let server = Server::new(listener, signals, 8);
   let run = server.run(move |mut stream| {
-    if require_uid(&stream, me).is_err() {
+    if let Err(err) = require_uid(&stream, me)
+      && !matches!(err, Error::Unsupported)
+    {
       return;
     }
     let frame = {
