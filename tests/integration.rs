@@ -5,11 +5,21 @@
 //! another or with the cargo test harness.
 
 use std::{
-  io::{BufRead as _, BufReader, Write as _},
+  io::{
+    BufRead as _,
+    BufReader,
+    Write as _,
+  },
   os::unix::net::UnixStream,
-  path::{Path, PathBuf},
+  path::{
+    Path,
+    PathBuf,
+  },
   process,
-  time::{Duration, Instant},
+  time::{
+    Duration,
+    Instant,
+  },
 };
 
 use knell::{
@@ -25,17 +35,16 @@ use knell::{
 };
 
 fn scratch_dir(tag: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!(
-    "knell-it-{tag}-{}-{}",
-    process::id(),
-    unique()
-  ));
+  let dir = std::env::temp_dir().join(format!("knell-it-{tag}-{}-{}", process::id(), unique()));
   std::fs::create_dir_all(&dir).expect("create scratch dir");
   dir
 }
 
 fn unique() -> u64 {
-  use std::sync::atomic::{AtomicU64, Ordering};
+  use std::sync::atomic::{
+    AtomicU64,
+    Ordering,
+  };
   static COUNTER: AtomicU64 = AtomicU64::new(0);
   COUNTER.fetch_add(1, Ordering::Relaxed)
 }
@@ -66,8 +75,7 @@ fn daemonize_round_trip() {
     run_daemon(&sock, &pid, &sentinel);
   }
 
-  let readiness_ok =
-    wait_for(Duration::from_secs(10), || reap_once(child) == Some(0));
+  let readiness_ok = wait_for(Duration::from_secs(10), || reap_once(child) == Some(0));
   assert!(readiness_ok, "daemon did not report readiness with exit 0");
   assert!(sock.exists(), "socket missing after readiness");
 
@@ -148,8 +156,7 @@ fn run_daemon(sock: &Path, pid: &Path, sentinel: &Path) -> ! {
       return;
     }
     let frame = {
-      let mut reader =
-        FrameReader::new(BufReader::new(&stream), DEFAULT_MAX_FRAME_BYTES);
+      let mut reader = FrameReader::new(BufReader::new(&stream), DEFAULT_MAX_FRAME_BYTES);
       reader.read_frame()
     };
     if let Ok(Some(frame)) = frame {

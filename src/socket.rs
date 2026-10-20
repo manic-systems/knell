@@ -6,15 +6,28 @@
 //! `SO_PEERCRED` (Linux only).
 
 use std::{
-  fs::{self, Permissions},
+  fs::{
+    self,
+    Permissions,
+  },
   os::unix::{
-    fs::{FileTypeExt as _, PermissionsExt as _},
-    net::{UnixListener, UnixStream},
+    fs::{
+      FileTypeExt as _,
+      PermissionsExt as _,
+    },
+    net::{
+      UnixListener,
+      UnixStream,
+    },
   },
   path::Path,
 };
 
-use crate::error::{Error, Result, io};
+use crate::error::{
+  Error,
+  Result,
+  io,
+};
 
 struct UmaskGuard(libc::mode_t);
 
@@ -54,8 +67,7 @@ pub fn bind_unix(path: impl AsRef<Path>, mode: u32) -> Result<UnixListener> {
 
   let listener = {
     let _umask = UmaskGuard::set(0o077);
-    UnixListener::bind(path)
-      .map_err(io(format!("binding {}", path.display())))?
+    UnixListener::bind(path).map_err(io(format!("binding {}", path.display())))?
   };
 
   if let Err(err) = fs::set_permissions(path, Permissions::from_mode(mode))
@@ -105,8 +117,7 @@ fn prepare_socket_path(path: &Path) -> Result<()> {
     },
   }
 
-  fs::remove_file(path)
-    .map_err(io(format!("removing stale socket {}", path.display())))?;
+  fs::remove_file(path).map_err(io(format!("removing stale socket {}", path.display())))?;
   Ok(())
 }
 
@@ -193,8 +204,7 @@ mod tests {
 
   #[test]
   fn reclaims_stale_socket() {
-    let dir =
-      std::env::temp_dir().join(format!("knell-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("knell-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("stale.sock");
     let _ = fs::remove_file(&path);
@@ -214,8 +224,7 @@ mod tests {
 
   #[test]
   fn refuses_live_socket() {
-    let dir =
-      std::env::temp_dir().join(format!("knell-live-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("knell-live-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("live.sock");
     let _ = fs::remove_file(&path);
@@ -232,8 +241,7 @@ mod tests {
 
   #[test]
   fn refuses_non_socket_path() {
-    let dir =
-      std::env::temp_dir().join(format!("knell-reg-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("knell-reg-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("not.sock");
     fs::write(&path, b"regular file").unwrap();

@@ -21,7 +21,14 @@
 //! ```no_run
 //! use std::io::Write as _;
 //!
-//! use knell::{Daemonize, PidFile, Server, SignalPipe, bind_unix, require_uid};
+//! use knell::{
+//!   Daemonize,
+//!   PidFile,
+//!   Server,
+//!   SignalPipe,
+//!   bind_unix,
+//!   require_uid,
+//! };
 //!
 //! fn main() -> knell::Result<()> {
 //!   let mut readiness = Daemonize::new().daemonize()?;
@@ -50,11 +57,28 @@ mod server;
 pub mod signals;
 pub mod socket;
 
-pub use connection_limit::{ConnectionLimiter, ConnectionSlot};
-pub use daemonize::{Daemonize, Readiness};
-pub use error::{Error, Result};
-pub use framed::{DEFAULT_MAX_FRAME_BYTES, FrameReader, read_limited_line};
+pub use connection_limit::{
+  ConnectionLimiter,
+  ConnectionSlot,
+};
+pub use daemonize::{
+  Daemonize,
+  Readiness,
+};
+pub use error::{
+  Error,
+  Result,
+};
+pub use framed::{
+  DEFAULT_MAX_FRAME_BYTES,
+  FrameReader,
+  read_limited_line,
+};
 pub use pidfile::PidFile;
 pub use server::Server;
 pub use signals::SignalPipe;
-pub use socket::{bind_unix, peer_uid, require_uid};
+pub use socket::{
+  bind_unix,
+  peer_uid,
+  require_uid,
+};

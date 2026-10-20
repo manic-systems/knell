@@ -1,4 +1,7 @@
-use std::io::{self, BufRead};
+use std::io::{
+  self,
+  BufRead,
+};
 
 /// Default frame-size ceiling (16 MiB) for [`FrameReader`].
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -18,10 +21,7 @@ pub const DEFAULT_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// Returns [`io::ErrorKind::InvalidData`] if the line exceeds `limit` bytes, or
 /// any error produced by the underlying reader.
-pub fn read_limited_line<R: BufRead>(
-  reader: &mut R,
-  limit: usize,
-) -> io::Result<Vec<u8>> {
+pub fn read_limited_line<R: BufRead>(reader: &mut R, limit: usize) -> io::Result<Vec<u8>> {
   let mut out = Vec::new();
 
   loop {
@@ -101,8 +101,7 @@ mod tests {
 
   #[test]
   fn reads_single_line() {
-    let mut reader =
-      FrameReader::new(Cursor::new(b"hello\nworld\n".to_vec()), 64);
+    let mut reader = FrameReader::new(Cursor::new(b"hello\nworld\n".to_vec()), 64);
     assert_eq!(reader.read_frame().unwrap().as_deref(), Some(&b"hello"[..]));
     assert_eq!(reader.read_frame().unwrap().as_deref(), Some(&b"world"[..]));
     assert_eq!(reader.read_frame().unwrap(), None);

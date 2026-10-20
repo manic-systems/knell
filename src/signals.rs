@@ -7,10 +7,17 @@
 
 use std::{
   os::fd::RawFd,
-  sync::atomic::{AtomicBool, AtomicI32, Ordering},
+  sync::atomic::{
+    AtomicBool,
+    AtomicI32,
+    Ordering,
+  },
 };
 
-use crate::error::{Result, io};
+use crate::error::{
+  Result,
+  io,
+};
 
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static SHUTDOWN_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
@@ -119,8 +126,7 @@ impl SignalPipe {
     loop {
       // SAFETY: `buf` is a valid writable buffer; the read end is a nonblocking
       // pipe, so this returns rather than blocking once drained.
-      let n =
-        unsafe { libc::read(self.read_fd, buf.as_mut_ptr().cast(), buf.len()) };
+      let n = unsafe { libc::read(self.read_fd, buf.as_mut_ptr().cast(), buf.len()) };
       if n <= 0 {
         break;
       }

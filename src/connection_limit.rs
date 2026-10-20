@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+  Arc,
+  Mutex,
+};
 
 /// Caps the number of concurrently held [`ConnectionSlot`]s.
 ///

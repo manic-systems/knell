@@ -1,7 +1,10 @@
 use std::{
   os::{
     fd::AsRawFd as _,
-    unix::net::{UnixListener, UnixStream},
+    unix::net::{
+      UnixListener,
+      UnixStream,
+    },
   },
   sync::Arc,
   thread,
@@ -9,7 +12,10 @@ use std::{
 
 use crate::{
   connection_limit::ConnectionLimiter,
-  error::{Result, io},
+  error::{
+    Result,
+    io,
+  },
   signals::SignalPipe,
 };
 
@@ -30,11 +36,7 @@ impl Server {
   /// Creates a server over `listener`, waking on `signals`, admitting at most
   /// `max_connections` concurrent handlers.
   #[must_use]
-  pub fn new(
-    listener: UnixListener,
-    signals: SignalPipe,
-    max_connections: usize,
-  ) -> Self {
+  pub fn new(listener: UnixListener, signals: SignalPipe, max_connections: usize) -> Self {
     Self {
       listener,
       signals,

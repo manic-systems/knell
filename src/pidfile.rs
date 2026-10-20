@@ -1,12 +1,22 @@
 use std::{
-  fs::{File, OpenOptions},
+  fs::{
+    File,
+    OpenOptions,
+  },
   io::Write as _,
   os::fd::AsRawFd as _,
-  path::{Path, PathBuf},
+  path::{
+    Path,
+    PathBuf,
+  },
   process,
 };
 
-use crate::error::{Error, Result, io};
+use crate::error::{
+  Error,
+  Result,
+  io,
+};
 
 /// A pidfile held under an exclusive advisory lock.
 ///
@@ -54,9 +64,7 @@ impl PidFile {
 
     // SAFETY: `flock` on a valid open fd; LOCK_NB makes it return rather than
     // block when another process holds the lock.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }
-      < 0
-    {
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
       let err = std::io::Error::last_os_error();
       if matches!(
         err.kind(),
@@ -103,8 +111,7 @@ mod tests {
 
   #[test]
   fn writes_pid_and_rejects_second_lock() {
-    let dir =
-      std::env::temp_dir().join(format!("knell-pid-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("knell-pid-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("daemon.pid");
     let _ = std::fs::remove_file(&path);

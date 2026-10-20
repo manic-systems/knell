@@ -1,16 +1,27 @@
 use std::{
   env,
   fs::OpenOptions,
-  io::{BufRead, BufReader, Write},
+  io::{
+    BufRead,
+    BufReader,
+    Write,
+  },
   os::{
-    fd::{AsRawFd as _, RawFd},
+    fd::{
+      AsRawFd as _,
+      RawFd,
+    },
     unix::net::UnixStream,
   },
   path::PathBuf,
   process,
 };
 
-use crate::error::{Error, Result, io};
+use crate::error::{
+  Error,
+  Result,
+  io,
+};
 
 /// Builder for turning the current process into a daemon.
 ///
@@ -97,11 +108,7 @@ impl Daemonize {
     }
   }
 
-  fn fork_with_pipe(
-    self,
-    reader: UnixStream,
-    writer: UnixStream,
-  ) -> Result<Readiness> {
+  fn fork_with_pipe(self, reader: UnixStream, writer: UnixStream) -> Result<Readiness> {
     // SAFETY: a single fork of this process; the child inherits both pipe ends.
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -145,8 +152,7 @@ impl Daemonize {
     }
 
     if let Some(dir) = &self.working_directory {
-      env::set_current_dir(dir)
-        .map_err(io(format!("changing directory to {}", dir.display())))?;
+      env::set_current_dir(dir).map_err(io(format!("changing directory to {}", dir.display())))?;
     }
 
     if self.redirect_stdio {

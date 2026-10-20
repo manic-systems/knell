@@ -1,4 +1,7 @@
-use std::{io, path::PathBuf};
+use std::{
+  io,
+  path::PathBuf,
+};
 
 /// A [`Result`](std::result::Result) whose error is this crate's [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
@@ -42,9 +45,7 @@ pub enum Error {
   Unsupported,
 }
 
-pub(crate) fn io(
-  context: impl Into<String>,
-) -> impl FnOnce(io::Error) -> Error {
+pub(crate) fn io(context: impl Into<String>) -> impl FnOnce(io::Error) -> Error {
   let context = context.into();
   move |source| Error::Io { context, source }
 }
