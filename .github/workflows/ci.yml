@@ -38,7 +38,7 @@ jobs:
       os: ubuntu-latest
       install-nix: false
       flake-check: false
-      rust-toolchain: 1.95.0
+      rust-toolchain: 1.97.0
       rust-targets: aarch64-apple-ios,aarch64-linux-android,armv7-linux-androideabi,i686-unknown-linux-gnu,x86_64-unknown-freebsd,x86_64-unknown-illumos,x86_64-unknown-netbsd
       clippy: true
       clippy-command: >-
@@ -54,7 +54,7 @@ jobs:
       os: ubuntu-latest
       install-nix: false
       flake-check: false
-      rust-toolchain: 1.95.0
+      rust-toolchain: 1.97.0
       test: true
       test-command: cargo test --locked
 

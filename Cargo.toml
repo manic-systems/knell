@@ -2,7 +2,7 @@
 name         = "knell"
 version      = "1.0.1"
 edition      = "2024"
-rust-version = "1.95.0"
+rust-version = "1.97.0"
 description  = "Batteries-included Unix-socket daemon harness"
 license      = "EUPL-1.2"
 repository   = "https://github.com/manic-systems/knell"

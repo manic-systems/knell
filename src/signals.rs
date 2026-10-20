@@ -200,13 +200,15 @@ fn set_nonblocking(fd: RawFd) -> Result<()> {
 /// Points `signal` at [`handle_signal`], returning the action it replaced.
 #[expect(
   clippy::as_conversions,
+  clippy::fn_to_numeric_cast_any,
   reason = "`sigaction` stores the handler as an integer"
 )]
 fn install_handler(signal: libc::c_int) -> Result<libc::sigaction> {
   // SAFETY: an all-zero `sigaction` is a valid starting point before its
   // fields are populated below.
   let mut action = unsafe { mem::zeroed::<libc::sigaction>() };
-  action.sa_sigaction = handle_signal as *const () as usize;
+  let handler: extern "C" fn(libc::c_int) = handle_signal;
+  action.sa_sigaction = handler as libc::sighandler_t;
   action.sa_flags = 0_i32;
   // SAFETY: initializes the signal mask owned by `action`.
   if unsafe { libc::sigemptyset(&raw mut action.sa_mask) } < 0_i32 {
