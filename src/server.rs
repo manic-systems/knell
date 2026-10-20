@@ -1,4 +1,10 @@
+//! A ready-made accept loop over a listener, signal pipe, and limiter.
+
 use std::{
+  io::{
+    self,
+    ErrorKind,
+  },
   os::{
     fd::AsRawFd as _,
     unix::net::{
@@ -27,8 +33,11 @@ use crate::{
 /// connection slot, and the loop returns once a shutdown signal arrives.
 /// Connections accepted while at the concurrency cap are dropped immediately.
 pub struct Server {
+  /// Socket the loop accepts connections on.
   listener: UnixListener,
+  /// Self-pipe that wakes the loop for shutdown.
   signals:  SignalPipe,
+  /// Cap on concurrently running handlers.
   limiter:  Arc<ConnectionLimiter>,
 }
 
@@ -36,6 +45,7 @@ impl Server {
   /// Creates a server over `listener`, waking on `signals`, admitting at most
   /// `max_connections` concurrent handlers.
   #[must_use]
+  #[inline]
   pub fn new(listener: UnixListener, signals: SignalPipe, max_connections: usize) -> Self {
     Self {
       listener,
@@ -50,7 +60,8 @@ impl Server {
   ///
   /// A reference to the [`UnixListener`] this server accepts connections on.
   #[must_use]
-  pub fn listener(&self) -> &UnixListener {
+  #[inline]
+  pub const fn listener(&self) -> &UnixListener {
     &self.listener
   }
 
@@ -60,7 +71,8 @@ impl Server {
   ///
   /// A reference to the [`SignalPipe`] the server wakes on.
   #[must_use]
-  pub fn signals(&self) -> &SignalPipe {
+  #[inline]
+  pub const fn signals(&self) -> &SignalPipe {
     &self.signals
   }
 
@@ -70,7 +82,8 @@ impl Server {
   ///
   /// A reference to the [`ConnectionLimiter`] shared by this server.
   #[must_use]
-  pub fn limiter(&self) -> &Arc<ConnectionLimiter> {
+  #[inline]
+  pub const fn limiter(&self) -> &Arc<ConnectionLimiter> {
     &self.limiter
   }
 
@@ -82,8 +95,10 @@ impl Server {
   ///
   /// # Errors
   ///
-  /// Returns an [`Error::Io`](crate::Error::Io) if the listener cannot be set
-  /// non-blocking or if polling fails for a reason other than an interrupt.
+  /// Returns an [`Error::Io`](crate::error::Error::Io) if the listener cannot
+  /// be set non-blocking or if polling fails for a reason other than an
+  /// interrupt.
+  #[inline]
   pub fn run<H>(self, handler: H) -> Result<()>
   where
     H: Fn(UnixStream) + Send + Sync + 'static,
@@ -93,7 +108,7 @@ impl Server {
       .set_nonblocking(true)
       .map_err(io("setting listener non-blocking"))?;
 
-    let handler = Arc::new(handler);
+    let shared = Arc::new(handler);
     let listener_fd = self.listener.as_raw_fd();
     let signal_fd = self.signals.read_fd();
 
@@ -114,9 +129,9 @@ impl Server {
       // SAFETY: `fds` is a valid, writable array of two `pollfd`s; -1 blocks
       // until a descriptor is ready.
       let rc = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
-      if rc < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.kind() == std::io::ErrorKind::Interrupted {
+      if rc < 0_i32 {
+        let err = io::Error::last_os_error();
+        if err.kind() == ErrorKind::Interrupted {
           continue;
         }
         return Err(io("polling listener")(err));
@@ -131,12 +146,14 @@ impl Server {
         continue;
       }
 
-      self.accept_ready(&handler);
+      self.accept_ready(&shared);
     }
 
     Ok(())
   }
 
+  /// Accepts every pending connection and hands each to `handler` on its own
+  /// thread, dropping connections that arrive while at the cap.
   fn accept_ready<H>(&self, handler: &Arc<H>)
   where
     H: Fn(UnixStream) + Send + Sync + 'static,
@@ -148,14 +165,14 @@ impl Server {
             drop(stream);
             continue;
           };
-          let handler = Arc::clone(handler);
-          let _ = thread::Builder::new().spawn(move || {
+          let owned = Arc::clone(handler);
+          drop(thread::Builder::new().spawn(move || {
             let _slot = slot;
-            handler(stream);
-          });
+            owned(stream);
+          }));
         },
-        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
-        Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {},
+        Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+        Err(err) if err.kind() == ErrorKind::Interrupted => {},
         Err(_) => break,
       }
     }

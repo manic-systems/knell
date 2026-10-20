@@ -4,7 +4,16 @@
 //! running inside a forked child, so the tests do not interfere with one
 //! another or with the cargo test harness.
 
+#![expect(
+  clippy::exit,
+  clippy::expect_used,
+  clippy::panic,
+  reason = "forked test children report through exit codes, helpers fail the test"
+)]
+
 use std::{
+  env,
+  fs,
   io::{
     BufRead as _,
     BufReader,
@@ -16,6 +25,11 @@ use std::{
     PathBuf,
   },
   process,
+  sync::atomic::{
+    AtomicU64,
+    Ordering,
+  },
+  thread,
   time::{
     Duration,
     Instant,
@@ -23,39 +37,42 @@ use std::{
 };
 
 use knell::{
-  DEFAULT_MAX_FRAME_BYTES,
-  Daemonize,
-  FrameReader,
-  PidFile,
-  Server,
-  SignalPipe,
-  bind_unix,
-  peer_uid,
-  require_uid,
+  daemonize::Daemonize,
+  framed::{
+    DEFAULT_MAX_FRAME_BYTES,
+    FrameReader,
+  },
+  pidfile::PidFile,
+  server::Server,
+  signals::SignalPipe,
+  socket::{
+    bind_unix,
+    peer_uid,
+    require_uid,
+  },
 };
 
 fn scratch_dir(tag: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("knell-it-{tag}-{}-{}", process::id(), unique()));
-  std::fs::create_dir_all(&dir).expect("create scratch dir");
+  let dir = env::temp_dir().join(format!("knell-it-{tag}-{}-{}", process::id(), unique()));
+  fs::create_dir_all(&dir).expect("create scratch dir");
   dir
 }
 
 fn unique() -> u64 {
-  use std::sync::atomic::{
-    AtomicU64,
-    Ordering,
-  };
   static COUNTER: AtomicU64 = AtomicU64::new(0);
   COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-fn wait_for<F: Fn() -> bool>(deadline: Duration, cond: F) -> bool {
+fn wait_for<F>(deadline: Duration, cond: F) -> bool
+where
+  F: Fn() -> bool,
+{
   let start = Instant::now();
   while start.elapsed() < deadline {
     if cond() {
       return true;
     }
-    std::thread::sleep(Duration::from_millis(20));
+    thread::sleep(Duration::from_millis(20));
   }
   cond()
 }
@@ -69,13 +86,13 @@ fn daemonize_round_trip() {
 
   // SAFETY: single fork; the child runs the daemon and never returns here.
   let child = unsafe { libc::fork() };
-  assert!(child >= 0, "fork failed");
+  assert!(child >= 0_i32, "fork failed");
 
-  if child == 0 {
+  if child == 0_i32 {
     run_daemon(&sock, &pid, &sentinel);
   }
 
-  let readiness_ok = wait_for(Duration::from_secs(10), || reap_once(child) == Some(0));
+  let readiness_ok = wait_for(Duration::from_secs(10), || reap_once(child) == Some(0_i32));
   assert!(readiness_ok, "daemon did not report readiness with exit 0");
   assert!(sock.exists(), "socket missing after readiness");
 
@@ -99,10 +116,10 @@ fn daemonize_round_trip() {
   assert_eq!(reply, b"ping\n", "echoed frame should round-trip");
 
   let daemon_pid = read_pid(&pid);
-  assert!(daemon_pid > 0, "pidfile should contain the daemon pid");
+  assert!(daemon_pid > 0_i32, "pidfile should contain the daemon pid");
 
   // SAFETY: signalling the daemon process we just identified.
-  assert_eq!(unsafe { libc::kill(daemon_pid, libc::SIGTERM) }, 0);
+  assert_eq!(unsafe { libc::kill(daemon_pid, libc::SIGTERM) }, 0_i32);
 
   assert!(
     wait_for(Duration::from_secs(10), || sentinel.exists()),
@@ -113,7 +130,7 @@ fn daemonize_round_trip() {
     "pidfile should be removed on clean shutdown"
   );
 
-  let _ = std::fs::remove_dir_all(&dir);
+  drop(fs::remove_dir_all(&dir));
 }
 
 fn run_daemon(sock: &Path, pid: &Path, sentinel: &Path) -> ! {
@@ -159,17 +176,16 @@ fn run_daemon(sock: &Path, pid: &Path, sentinel: &Path) -> ! {
       let mut reader = FrameReader::new(BufReader::new(&stream), DEFAULT_MAX_FRAME_BYTES);
       reader.read_frame()
     };
-    if let Ok(Some(frame)) = frame {
-      let _ = stream.write_all(&frame);
-      let _ = stream.write_all(b"\n");
-      let _ = stream.flush();
+    if let Ok(Some(mut echo)) = frame {
+      echo.push(b'\n');
+      drop(stream.write_all(&echo));
     }
   });
 
   drop(pidfile);
-  let _ = std::fs::remove_file(sock);
+  drop(fs::remove_file(sock));
   if run.is_ok() {
-    let _ = std::fs::write(sentinel, b"ok");
+    drop(fs::write(sentinel, b"ok"));
   }
   process::exit(0);
 }
@@ -179,17 +195,19 @@ fn signal_pipe_flips_and_wakes() {
   // SAFETY: single fork; the child isolates the signal handlers and global
   // shutdown state so it cannot disturb the test harness.
   let child = unsafe { libc::fork() };
-  assert!(child >= 0, "fork failed");
+  assert!(child >= 0_i32, "fork failed");
 
-  if child == 0 {
+  if child == 0_i32 {
     let Ok(signals) = SignalPipe::install() else {
       process::exit(2);
     };
     assert!(!signals.shutdown_requested());
 
+    // SAFETY: getpid has no preconditions.
+    let me = unsafe { libc::getpid() };
     // SAFETY: deliver SIGTERM to this process; delivered before kill returns.
-    unsafe {
-      libc::kill(libc::getpid(), libc::SIGTERM);
+    if unsafe { libc::kill(me, libc::SIGTERM) } != 0_i32 {
+      process::exit(5);
     }
 
     if !signals.shutdown_requested() {
@@ -204,7 +222,7 @@ fn signal_pipe_flips_and_wakes() {
     // SAFETY: `poll` points at one valid `pollfd`; a 1s timeout bounds the
     // wait.
     let rc = unsafe { libc::poll(&raw mut poll, 1, 1000) };
-    if rc != 1 || poll.revents & libc::POLLIN == 0 {
+    if rc != 1_i32 || poll.revents & libc::POLLIN == 0 {
       process::exit(4);
     }
 
@@ -214,7 +232,7 @@ fn signal_pipe_flips_and_wakes() {
   let status = wait_blocking(child);
   assert_eq!(
     status,
-    Some(0),
+    Some(0_i32),
     "child signal assertions failed (code shown)"
   );
 }
@@ -230,7 +248,7 @@ fn connect_with_retry(path: &Path) -> UnixStream {
     match UnixStream::connect(path) {
       Ok(stream) => return stream,
       Err(_) if Instant::now() < deadline => {
-        std::thread::sleep(Duration::from_millis(20));
+        thread::sleep(Duration::from_millis(20));
       },
       Err(err) => panic!("connect to {}: {err}", path.display()),
     }
@@ -238,25 +256,25 @@ fn connect_with_retry(path: &Path) -> UnixStream {
 }
 
 fn read_pid(path: &Path) -> libc::pid_t {
-  let contents = std::fs::read_to_string(path).unwrap_or_default();
+  let contents = fs::read_to_string(path).unwrap_or_default();
   contents.trim().parse().unwrap_or(0)
 }
 
 fn reap_once(child: libc::pid_t) -> Option<i32> {
-  let mut status = 0;
+  let mut status = 0_i32;
   // SAFETY: standard non-blocking wait for a known child pid.
   let rc = unsafe { libc::waitpid(child, &raw mut status, libc::WNOHANG) };
   if rc == child { exit_code(status) } else { None }
 }
 
 fn wait_blocking(child: libc::pid_t) -> Option<i32> {
-  let mut status = 0;
+  let mut status = 0_i32;
   // SAFETY: standard blocking wait for a known child pid.
   let rc = unsafe { libc::waitpid(child, &raw mut status, 0) };
   if rc == child { exit_code(status) } else { None }
 }
 
-fn exit_code(status: libc::c_int) -> Option<i32> {
+const fn exit_code(status: libc::c_int) -> Option<i32> {
   if libc::WIFEXITED(status) {
     Some(libc::WEXITSTATUS(status))
   } else {

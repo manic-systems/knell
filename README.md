@@ -50,9 +50,15 @@ pipe together and returns cleanly on `SIGINT`/`SIGTERM`.
 ```rust
 use std::io::Write as _;
 
-use knell::{Daemonize, PidFile, Server, SignalPipe, bind_unix, require_uid};
+use knell::{
+  daemonize::Daemonize,
+  pidfile::PidFile,
+  server::Server,
+  signals::SignalPipe,
+  socket::{bind_unix, require_uid},
+};
 
-fn main() -> knell::Result<()> {
+fn main() -> knell::error::Result<()> {
   let mut readiness = Daemonize::new().daemonize()?;
   let _pidfile = PidFile::create("/run/user/1000/example.pid")?;
 

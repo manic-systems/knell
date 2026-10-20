@@ -18,19 +18,28 @@
 //! connections through [`Server`], which polls the listener and the
 //! [`SignalPipe`] together and caps concurrency with a [`ConnectionLimiter`].
 //!
+//! [`Daemonize::daemonize`]: daemonize::Daemonize::daemonize
+//! [`Readiness::ready`]: daemonize::Readiness::ready
+//! [`Readiness::failed`]: daemonize::Readiness::failed
+//! [`Server`]: server::Server
+//! [`SignalPipe`]: signals::SignalPipe
+//! [`ConnectionLimiter`]: connection_limit::ConnectionLimiter
+//!
 //! ```no_run
 //! use std::io::Write as _;
 //!
 //! use knell::{
-//!   Daemonize,
-//!   PidFile,
-//!   Server,
-//!   SignalPipe,
-//!   bind_unix,
-//!   require_uid,
+//!   daemonize::Daemonize,
+//!   pidfile::PidFile,
+//!   server::Server,
+//!   signals::SignalPipe,
+//!   socket::{
+//!     bind_unix,
+//!     require_uid,
+//!   },
 //! };
 //!
-//! fn main() -> knell::Result<()> {
+//! fn main() -> knell::error::Result<()> {
 //!   let mut readiness = Daemonize::new().daemonize()?;
 //!   let _pidfile = PidFile::create("/run/user/1000/example.pid")?;
 //!   let listener = bind_unix("/run/user/1000/example.sock", 0o600)?;
@@ -48,37 +57,11 @@
 
 #![warn(missing_docs)]
 
-mod connection_limit;
-mod daemonize;
-mod error;
-mod framed;
-mod pidfile;
-mod server;
+pub mod connection_limit;
+pub mod daemonize;
+pub mod error;
+pub mod framed;
+pub mod pidfile;
+pub mod server;
 pub mod signals;
 pub mod socket;
-
-pub use connection_limit::{
-  ConnectionLimiter,
-  ConnectionSlot,
-};
-pub use daemonize::{
-  Daemonize,
-  Readiness,
-};
-pub use error::{
-  Error,
-  Result,
-};
-pub use framed::{
-  DEFAULT_MAX_FRAME_BYTES,
-  FrameReader,
-  read_limited_line,
-};
-pub use pidfile::PidFile;
-pub use server::Server;
-pub use signals::SignalPipe;
-pub use socket::{
-  bind_unix,
-  peer_uid,
-  require_uid,
-};

@@ -6,7 +6,10 @@
 //! the previous handlers.
 
 use std::{
+  io,
+  mem,
   os::fd::RawFd,
+  ptr,
   sync::atomic::{
     AtomicBool,
     AtomicI32,
@@ -19,7 +22,9 @@ use crate::error::{
   io,
 };
 
+/// Set by the signal handler once `SIGINT` or `SIGTERM` arrives.
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+/// Write end of the live self-pipe, or -1 when none is installed.
 static SHUTDOWN_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
 
 /// Shutdown status observed across the process.
@@ -29,6 +34,7 @@ static SHUTDOWN_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
 /// `true` once a `SIGINT` or `SIGTERM` has been observed by an installed
 /// [`SignalPipe`], and `false` otherwise.
 #[must_use]
+#[inline]
 pub fn shutdown_requested() -> bool {
   SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
 }
@@ -38,9 +44,13 @@ pub fn shutdown_requested() -> bool {
 /// Only one should be live at a time per process; the global write end is
 /// shared by the async-signal-safe handler.
 pub struct SignalPipe {
+  /// Readable end of the self-pipe.
   read_fd:  RawFd,
+  /// Writable end the handler pokes.
   write_fd: RawFd,
+  /// `SIGINT` action to restore on drop.
   old_int:  libc::sigaction,
+  /// `SIGTERM` action to restore on drop.
   old_term: libc::sigaction,
 }
 
@@ -52,15 +62,16 @@ impl SignalPipe {
   ///
   /// # Errors
   ///
-  /// Returns an [`Error::Io`](crate::Error::Io) if the pipe cannot be created
-  /// or configured, or if a signal handler cannot be installed.
+  /// Returns an [`Error::Io`](crate::error::Error::Io) if the pipe cannot be
+  /// created or configured, or if a signal handler cannot be installed.
+  #[inline]
   pub fn install() -> Result<Self> {
     SHUTDOWN_REQUESTED.store(false, Ordering::SeqCst);
 
-    let mut fds = [0; 2];
+    let mut fds = [0_i32; 2];
     // SAFETY: `fds` is a writable pair of integers populated by `pipe`.
-    if unsafe { libc::pipe(fds.as_mut_ptr()) } < 0 {
-      return Err(io("creating signal pipe")(std::io::Error::last_os_error()));
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } < 0_i32 {
+      return Err(io("creating signal pipe")(io::Error::last_os_error()));
     }
 
     if let Err(err) = configure(fds[0], fds[1]) {
@@ -106,7 +117,8 @@ impl SignalPipe {
   /// The file descriptor for the readable end, suitable for polling alongside
   /// a listener.
   #[must_use]
-  pub fn read_fd(&self) -> RawFd {
+  #[inline]
+  pub const fn read_fd(&self) -> RawFd {
     self.read_fd
   }
 
@@ -116,16 +128,19 @@ impl SignalPipe {
   ///
   /// `true` once a `SIGINT` or `SIGTERM` has been observed.
   #[must_use]
+  #[inline]
   pub fn shutdown_requested(&self) -> bool {
     shutdown_requested()
   }
 
   /// Drains any pending wake-up bytes from the pipe.
+  #[inline]
   pub fn drain(&self) {
     let mut buf = [0_u8; 64];
     loop {
-      // SAFETY: `buf` is a valid writable buffer; the read end is a nonblocking
-      // pipe, so this returns rather than blocking once drained.
+      // SAFETY: `buf` is a valid writable buffer; the read end is a
+      // nonblocking pipe, so this returns rather than blocking once
+      // drained.
       let n = unsafe { libc::read(self.read_fd, buf.as_mut_ptr().cast(), buf.len()) };
       if n <= 0 {
         break;
@@ -135,6 +150,7 @@ impl SignalPipe {
 }
 
 impl Drop for SignalPipe {
+  #[inline]
   fn drop(&mut self) {
     restore_handler(libc::SIGINT, &self.old_int);
     restore_handler(libc::SIGTERM, &self.old_term);
@@ -144,6 +160,7 @@ impl Drop for SignalPipe {
   }
 }
 
+/// Marks both pipe ends close-on-exec and nonblocking.
 fn configure(read_fd: RawFd, write_fd: RawFd) -> Result<()> {
   set_cloexec(read_fd)?;
   set_cloexec(write_fd)?;
@@ -152,67 +169,72 @@ fn configure(read_fd: RawFd, write_fd: RawFd) -> Result<()> {
   Ok(())
 }
 
+/// Adds `FD_CLOEXEC` to `fd`.
 fn set_cloexec(fd: RawFd) -> Result<()> {
   // SAFETY: reads descriptor flags for a valid open fd.
   let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-  if flags < 0 {
-    return Err(io("reading fd flags")(std::io::Error::last_os_error()));
+  if flags < 0_i32 {
+    return Err(io("reading fd flags")(io::Error::last_os_error()));
   }
   // SAFETY: writes descriptor flags for the same valid open fd.
-  if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
-    return Err(io("setting fd cloexec")(std::io::Error::last_os_error()));
+  if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0_i32 {
+    return Err(io("setting fd cloexec")(io::Error::last_os_error()));
   }
   Ok(())
 }
 
+/// Adds `O_NONBLOCK` to `fd`.
 fn set_nonblocking(fd: RawFd) -> Result<()> {
   // SAFETY: reads status flags for a valid open fd.
   let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-  if flags < 0 {
-    return Err(io("reading fd status")(std::io::Error::last_os_error()));
+  if flags < 0_i32 {
+    return Err(io("reading fd status")(io::Error::last_os_error()));
   }
   // SAFETY: writes status flags for the same valid open fd.
-  if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
-    return Err(io("setting fd nonblocking")(std::io::Error::last_os_error()));
+  if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0_i32 {
+    return Err(io("setting fd nonblocking")(io::Error::last_os_error()));
   }
   Ok(())
 }
 
+/// Points `signal` at [`handle_signal`], returning the action it replaced.
+#[expect(
+  clippy::as_conversions,
+  reason = "`sigaction` stores the handler as an integer"
+)]
 fn install_handler(signal: libc::c_int) -> Result<libc::sigaction> {
-  // SAFETY: an all-zero `sigaction` is a valid starting point before its fields
-  // are populated below.
-  let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+  // SAFETY: an all-zero `sigaction` is a valid starting point before its
+  // fields are populated below.
+  let mut action = unsafe { mem::zeroed::<libc::sigaction>() };
   action.sa_sigaction = handle_signal as *const () as usize;
-  action.sa_flags = 0;
+  action.sa_flags = 0_i32;
   // SAFETY: initializes the signal mask owned by `action`.
-  if unsafe { libc::sigemptyset(&raw mut action.sa_mask) } < 0 {
-    return Err(io("initializing signal mask")(
-      std::io::Error::last_os_error(),
-    ));
+  if unsafe { libc::sigemptyset(&raw mut action.sa_mask) } < 0_i32 {
+    return Err(io("initializing signal mask")(io::Error::last_os_error()));
   }
 
   // SAFETY: provides zeroed storage for the previous action returned below.
-  let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+  let mut old = unsafe { mem::zeroed::<libc::sigaction>() };
   // SAFETY: installs an async-signal-safe handler for a real signal number.
-  if unsafe { libc::sigaction(signal, &raw const action, &raw mut old) } < 0 {
-    return Err(io("installing signal handler")(
-      std::io::Error::last_os_error(),
-    ));
+  if unsafe { libc::sigaction(signal, &raw const action, &raw mut old) } < 0_i32 {
+    return Err(io("installing signal handler")(io::Error::last_os_error()));
   }
   Ok(old)
 }
 
+/// Reinstates a previously captured action for `signal`.
 fn restore_handler(signal: libc::c_int, action: &libc::sigaction) {
   // SAFETY: restores an action previously captured from `sigaction`.
   unsafe {
-    libc::sigaction(signal, action, std::ptr::null_mut());
+    libc::sigaction(signal, action, ptr::null_mut());
   }
 }
 
+/// Async-signal-safe handler that flags shutdown and wakes the pipe.
 extern "C" fn handle_signal(_signal: libc::c_int) {
   SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
   let fd = SHUTDOWN_WRITE_FD.load(Ordering::SeqCst);
-  if fd >= 0 {
+  if fd >= 0_i32 {
     let byte = [1_u8];
     // SAFETY: `write` is async-signal-safe; `fd` is a nonblocking pipe write
     // end while handlers are installed. The result is intentionally
@@ -223,6 +245,7 @@ extern "C" fn handle_signal(_signal: libc::c_int) {
   }
 }
 
+/// Closes `fd`, ignoring failure.
 fn close_fd(fd: RawFd) {
   // SAFETY: best-effort close of a pipe fd owned by this module.
   unsafe {

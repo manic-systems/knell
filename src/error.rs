@@ -1,10 +1,13 @@
+//! The crate-wide [`Error`] and [`Result`] types.
+
 use std::{
   io,
   path::PathBuf,
+  result,
 };
 
-/// A [`Result`](std::result::Result) whose error is this crate's [`Error`].
-pub type Result<T> = std::result::Result<T, Error>;
+/// A [`Result`](result::Result) whose error is this crate's [`Error`].
+pub type Result<T> = result::Result<T, Error>;
 
 /// Everything that can go wrong inside `knell`.
 #[non_exhaustive]
@@ -45,7 +48,17 @@ pub enum Error {
   Unsupported,
 }
 
-pub(crate) fn io(context: impl Into<String>) -> impl FnOnce(io::Error) -> Error {
-  let context = context.into();
-  move |source| Error::Io { context, source }
+/// Builds a mapper that wraps an [`io::Error`] as [`Error::Io`] tagged with
+/// `context`.
+pub(crate) fn io<C>(context: C) -> impl FnOnce(io::Error) -> Error
+where
+  C: Into<String>,
+{
+  let owned = context.into();
+  move |source| {
+    Error::Io {
+      context: owned,
+      source,
+    }
+  }
 }

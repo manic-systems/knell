@@ -1,10 +1,13 @@
+//! Double-fork daemonization with a readiness pipe back to the launcher.
+
 use std::{
   env,
   fs::OpenOptions,
   io::{
-    BufRead,
+    self,
+    BufRead as _,
     BufReader,
-    Write,
+    Write as _,
   },
   os::{
     fd::{
@@ -30,12 +33,16 @@ use crate::error::{
 /// the daemon report startup success or failure back to the launching process.
 #[derive(Debug, Clone)]
 pub struct Daemonize {
+  /// Directory to change into after forking, or `None` to stay put.
   working_directory: Option<PathBuf>,
+  /// Whether stdin, stdout, and stderr are pointed at `/dev/null`.
   redirect_stdio:    bool,
+  /// Whether the launcher waits for a readiness report.
   readiness_pipe:    bool,
 }
 
 impl Default for Daemonize {
+  #[inline]
   fn default() -> Self {
     Self {
       working_directory: Some(PathBuf::from("/")),
@@ -49,19 +56,25 @@ impl Daemonize {
   /// Creates a builder with the default configuration: change to `/`, redirect
   /// stdio to `/dev/null`, and use a readiness pipe.
   #[must_use]
+  #[inline]
   pub fn new() -> Self {
     Self::default()
   }
 
   /// Sets the directory the daemon changes into after forking.
   #[must_use]
-  pub fn working_directory(mut self, dir: impl Into<PathBuf>) -> Self {
+  #[inline]
+  pub fn working_directory<D>(mut self, dir: D) -> Self
+  where
+    D: Into<PathBuf>,
+  {
     self.working_directory = Some(dir.into());
     self
   }
 
   /// Keeps the current working directory instead of changing it.
   #[must_use]
+  #[inline]
   pub fn keep_working_directory(mut self) -> Self {
     self.working_directory = None;
     self
@@ -69,7 +82,8 @@ impl Daemonize {
 
   /// Controls whether stdin, stdout, and stderr are redirected to `/dev/null`.
   #[must_use]
-  pub fn redirect_stdio(mut self, redirect: bool) -> Self {
+  #[inline]
+  pub const fn redirect_stdio(mut self, redirect: bool) -> Self {
     self.redirect_stdio = redirect;
     self
   }
@@ -79,7 +93,8 @@ impl Daemonize {
   /// When disabled, the launching process does not wait for readiness and
   /// [`daemonize`](Daemonize::daemonize) returns a no-op [`Readiness`].
   #[must_use]
-  pub fn readiness_pipe(mut self, enabled: bool) -> Self {
+  #[inline]
+  pub const fn readiness_pipe(mut self, enabled: bool) -> Self {
     self.readiness_pipe = enabled;
     self
   }
@@ -95,6 +110,7 @@ impl Daemonize {
   ///
   /// Returns [`Error::Daemonize`] if a `fork` or `setsid` fails, or an
   /// [`Error::Io`] if the working-directory change or stdio redirection fails.
+  #[inline]
   pub fn daemonize(self) -> Result<Readiness> {
     let pipe = if self.readiness_pipe {
       Some(UnixStream::pair().map_err(io("creating readiness pipe"))?)
@@ -108,13 +124,15 @@ impl Daemonize {
     }
   }
 
+  /// Forks once with a readiness pipe; the parent waits on it and exits.
   fn fork_with_pipe(self, reader: UnixStream, writer: UnixStream) -> Result<Readiness> {
-    // SAFETY: a single fork of this process; the child inherits both pipe ends.
+    // SAFETY: a single fork of this process; the child inherits both pipe
+    // ends.
     let pid = unsafe { libc::fork() };
-    if pid < 0 {
+    if pid < 0_i32 {
       return Err(Error::Daemonize("fork failed".into()));
     }
-    if pid > 0 {
+    if pid > 0_i32 {
       drop(writer);
       wait_for_readiness(reader);
     }
@@ -130,28 +148,31 @@ impl Daemonize {
     Ok(reporter)
   }
 
+  /// Detaches without a readiness pipe, so the launcher does not wait.
   fn fork_detached(self) -> Result<Readiness> {
     self.detach()?;
     Ok(Readiness { pipe: None })
   }
 
+  /// Starts a new session, forks again, and applies the directory and stdio
+  /// settings in the final daemon process.
   fn detach(&self) -> Result<()> {
     // SAFETY: creates a new session for the already-forked child.
-    if unsafe { libc::setsid() } < 0 {
+    if unsafe { libc::setsid() } < 0_i32 {
       return Err(Error::Daemonize("setsid failed".into()));
     }
 
     // SAFETY: second fork guarantees the daemon can never reacquire a
     // controlling terminal.
     let pid = unsafe { libc::fork() };
-    if pid < 0 {
+    if pid < 0_i32 {
       return Err(Error::Daemonize("second fork failed".into()));
     }
-    if pid > 0 {
+    if pid > 0_i32 {
       process::exit(0);
     }
 
-    if let Some(dir) = &self.working_directory {
+    if let Some(dir) = self.working_directory.as_deref() {
       env::set_current_dir(dir).map_err(io(format!("changing directory to {}", dir.display())))?;
     }
 
@@ -168,36 +189,48 @@ impl Daemonize {
 /// The first call writes the status down the readiness pipe; later calls are
 /// no-ops. If the pipe was disabled, every method is a no-op.
 pub struct Readiness {
+  /// Write end of the readiness pipe, taken by the first report.
   pipe: Option<UnixStream>,
 }
 
 impl Readiness {
   /// Reports successful startup; the launching process exits with code 0.
+  #[inline]
   pub fn ready(&mut self) {
     self.report('1', "");
   }
 
   /// Reports successful startup and prints `message` from the launching
   /// process before it exits with code 0.
+  #[inline]
   pub fn ready_with(&mut self, message: &str) {
     self.report('1', message);
   }
 
   /// Reports a startup failure; the launching process prints `message` to
   /// stderr and exits with code 1.
+  #[inline]
   pub fn failed(&mut self, message: &str) {
     self.report('0', message);
   }
 
+  /// Sends `tag` and a single-line `message` to the launcher, once.
   fn report(&mut self, tag: char, message: &str) {
     if let Some(mut pipe) = self.pipe.take() {
       let line = format!("{tag}{}\n", message.replace('\n', " "));
-      let _ = pipe.write_all(line.as_bytes());
-      let _ = pipe.flush();
+      drop(pipe.write_all(line.as_bytes()));
     }
   }
 }
 
+/// Blocks the launcher until the daemon reports, relays its message, and
+/// exits with the matching code.
+#[expect(
+  clippy::exit,
+  clippy::print_stderr,
+  clippy::print_stdout,
+  reason = "the launcher's only job is to relay daemon status and exit"
+)]
 fn wait_for_readiness(reader: UnixStream) -> ! {
   let mut line = String::new();
   match BufReader::new(reader).read_line(&mut line) {
@@ -229,6 +262,7 @@ fn wait_for_readiness(reader: UnixStream) -> ! {
   process::exit(1);
 }
 
+/// Points stdin, stdout, and stderr at `/dev/null`.
 fn redirect_stdio_to_dev_null() -> Result<()> {
   let dev_null = OpenOptions::new()
     .read(true)
@@ -240,8 +274,8 @@ fn redirect_stdio_to_dev_null() -> Result<()> {
   for target in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
     // SAFETY: `source` is an open fd for /dev/null and `target` is a standard
     // descriptor owned by this process.
-    if unsafe { libc::dup2(source, target) } < 0 {
-      let err = std::io::Error::last_os_error();
+    if unsafe { libc::dup2(source, target) } < 0_i32 {
+      let err = io::Error::last_os_error();
       if source != dev_null.as_raw_fd() {
         // SAFETY: closes the temporary fd created by `stable_source_fd`.
         unsafe {
@@ -262,17 +296,18 @@ fn redirect_stdio_to_dev_null() -> Result<()> {
   Ok(())
 }
 
+/// Returns `fd`, or a duplicate above the stdio range if `fd` is 0, 1, or 2.
 fn stable_source_fd(fd: RawFd) -> Result<RawFd> {
   if fd > libc::STDERR_FILENO {
     return Ok(fd);
   }
 
-  // SAFETY: duplicates a valid fd to a number above the stdio range so dropping
-  // the owning `File` cannot close descriptor 0, 1, or 2.
-  let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
-  if duplicate < 0 {
+  // SAFETY: duplicates a valid fd to a number above the stdio range so
+  // dropping the owning `File` cannot close descriptor 0, 1, or 2.
+  let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3_i32) };
+  if duplicate < 0_i32 {
     return Err(io("duplicating /dev/null descriptor")(
-      std::io::Error::last_os_error(),
+      io::Error::last_os_error(),
     ));
   }
   Ok(duplicate)
