@@ -1,27 +1,42 @@
 {
-  inputs.nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.zst";
+  inputs = {
+    nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.zst";
 
-  outputs = {
-    self,
-    nixpkgs,
-  }: let
-    systems = ["x86_64-linux" "aarch64-linux"];
-    forEachSystem = nixpkgs.lib.genAttrs systems;
-    pkgsFor = system: nixpkgs.legacyPackages.${system};
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = {self, ...} @ inputs: let
+    inherit (inputs) nixpkgs fenix;
+    inherit (nixpkgs) lib;
+    forAllSystems = lib.genAttrs (lib.systems.doubles.linux ++ lib.systems.doubles.darwin);
+    pkgsFor = system: nixpkgs.legacyPackages.${system} or (import nixpkgs {inherit system;});
   in {
-    packages = forEachSystem (system: let
-      pkgs = pkgsFor system;
-    in {
-      knell = pkgs.callPackage ./nix/package.nix {};
-      default = self.packages.${system}.knell;
+    packages = forAllSystems (
+      system: let
+        knell = (pkgsFor system).callPackage ./nix/package.nix {};
+      in {
+        inherit knell;
+        default = knell;
+      }
+    );
+
+    devShells = forAllSystems (
+      system: let
+        pkgs = pkgsFor system;
+      in {
+        default = pkgs.callPackage ./nix/shell.nix {
+          rustfmt = fenix.packages.${system}.latest.rustfmt or pkgs.rustfmt;
+        };
+      }
+    );
+
+    checks = forAllSystems (system: {
+      knell = self.packages.${system}.knell;
     });
 
-    devShells = forEachSystem (system: let
-      pkgs = pkgsFor system;
-    in {
-      default = pkgs.callPackage ./nix/shell.nix {};
-    });
-
-    formatter = forEachSystem (system: (pkgsFor system).alejandra);
+    formatter = forAllSystems (system: (pkgsFor system).alejandra);
   };
 }

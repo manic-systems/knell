@@ -1,5 +1,22 @@
-/target/
+*
+!.cade
+!.clippy.toml
+!.editorconfig
+!.gitignore
+!.rustfmt.toml
+!.taplo.toml
+!Cargo.lock
+!Cargo.toml
+!LICENSE
+!README.md
+!flake.lock
+!flake.nix
 
-# Nix
-/.direnv
-/result*
+!.github/
+!.github/**
+!nix/
+!nix/**
+!src/
+!src/**
+!tests/
+!tests/**

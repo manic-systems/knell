@@ -1,28 +1,46 @@
 {
+  lib,
+  stdenv,
   mkShell,
-  cargo,
   rustc,
+  cargo,
+  rust-analyzer,
   rustfmt,
   clippy,
+  taplo,
+  clang,
   wild,
-  rust-analyzer,
-  cargo-nextest,
+  rustPlatform,
+  extraPackages ? [],
 }: let
-  inherit (rustc) llvmPackages;
+  hasWild =
+    stdenv.hostPlatform.isLinux && (stdenv.hostPlatform.isx86_64 || stdenv.hostPlatform.isAarch64);
 in
   mkShell {
+    name = "knell";
+
     strictDeps = true;
-    nativeBuildInputs = [
-      cargo
-      rustc
 
-      wild
-      llvmPackages.clang
+    nativeBuildInputs =
+      [
+        rustc
+        cargo
+        rust-analyzer
+        rustfmt
+        clippy
+        taplo
+      ]
+      ++ lib.optionals hasWild [
+        clang
+        wild
+      ]
+      ++ extraPackages;
 
-      (rustfmt.override {asNightly = true;})
-      clippy
-      rust-analyzer
-
-      cargo-nextest
-    ];
+    env =
+      {
+        RUST_SRC_PATH = "${rustPlatform.rustLibSrc}";
+      }
+      // lib.optionalAttrs hasWild {
+        RUSTFLAGS = "-Clinker=${clang}/bin/clang -Clink-arg=--ld-path=wild";
+      };
   }

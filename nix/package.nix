@@ -1,24 +1,35 @@
 {
   lib,
   rustPlatform,
-}:
-rustPlatform.buildRustPackage (finalAttrs: {
-  pname = "knell";
-  version = "0.1.0";
-  src = let
-    fs = lib.fileset;
-    s = ../.;
-  in
-    fs.toSource {
-      root = s;
-      fileset = fs.unions [
-        (s + /src)
-        (s + /tests)
+}: let
+  cargoTOML = (lib.importTOML ../Cargo.toml).package;
+in
+  rustPlatform.buildRustPackage {
+    pname = "knell";
+    inherit (cargoTOML) version;
 
-        (s + /Cargo.toml)
-        (s + /Cargo.lock)
-      ];
+    src = let
+      fs = lib.fileset;
+      s = ../.;
+    in
+      fs.toSource {
+        root = s;
+        fileset = fs.unions [
+          (s + /src)
+          (s + /tests)
+          (s + /Cargo.lock)
+          (s + /Cargo.toml)
+        ];
+      };
+
+    cargoLock.lockFile = ../Cargo.lock;
+
+    strictDeps = true;
+    enableParallelBuilding = true;
+
+    meta = {
+      inherit (cargoTOML) description;
+      license = lib.licenses.eupl12;
+      maintainers = with lib.maintainers; [amaanq];
     };
-
-  cargoLock.lockFile = "${finalAttrs.src}/Cargo.lock";
-})
+  }
